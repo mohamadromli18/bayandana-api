@@ -1,13 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.core.database import supabase # Mengimpor konektor yang baru dibuat
 
-app = FastAPI(
-    title="Bayandana API",
-    description="SaaS Manajemen Keuangan Masjid (PSAK 109)",
-    version="1.0.0"
-)
+app = FastAPI(title="Bayandana API", version="1.0.0")
 
-# Mengizinkan akses lintas platform (CORS) agar UI nantinya bisa mengakses API ini
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -18,4 +14,14 @@ app.add_middleware(
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "message": "API Bayandana menyala dan siap!"}
+    return {"status": "ok", "message": "API Bayandana menyala!"}
+
+# Endpoint baru untuk menguji koneksi database
+@app.get("/test-db")
+def test_db_connection():
+    try:
+        # Mencoba membaca isi tabel organizations
+        response = supabase.table("organizations").select("*").execute()
+        return {"status": "terhubung", "data": response.data}
+    except Exception as e:
+        return {"status": "gagal", "error": str(e)}
