@@ -1,9 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import supabase
-from app.api.v1.router import api_router # Impor Terminal Pusat Router
+from app.api.v1.router import api_router
 
-app = FastAPI(title="Bayandana API", version="1.0.0")
+# Mengubah CDN default ke unpkg untuk menghindari blokiran pada jaringan/komputer tertentu
+app = FastAPI(
+    title="Bayandana API", 
+    version="1.0.0",
+    swagger_js_url="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js",
+    swagger_css_url="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css",
+    swagger_favicon_url="https://fastapi.tiangolo.com/img/favicon.png"
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -13,9 +20,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mendaftarkan SELURUH rute v1 hanya dengan satu baris ini
 app.include_router(api_router, prefix="/api/v1")
-
 
 @app.get("/health")
 def health_check():
