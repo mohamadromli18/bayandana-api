@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import supabase
-from app.api.v1.endpoints import organizations # Impor router baru
+from app.api.v1.router import api_router # Impor Terminal Pusat Router
 
 app = FastAPI(title="Bayandana API", version="1.0.0")
 
@@ -13,12 +13,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mendaftarkan rute organisasi
-app.include_router(
-    organizations.router, 
-    prefix="/api/v1/organizations", 
-    tags=["Organizations"]
-)
+# Mendaftarkan SELURUH rute v1 hanya dengan satu baris ini
+app.include_router(api_router, prefix="/api/v1")
+
 
 @app.get("/health")
 def health_check():
