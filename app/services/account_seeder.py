@@ -1,3 +1,7 @@
+# app/services/account_seeder.py
+from app.core.database import supabase
+
+# Daftar Chart of Accounts standar PSAK 109
 DEFAULT_PSAK109_ACCOUNTS = [
     # 1. ASET
     {"account_code": "1110", "account_name": "Kas Kecil", "account_type": "Asset", "is_active": True},
@@ -25,3 +29,27 @@ DEFAULT_PSAK109_ACCOUNTS = [
     {"account_code": "5130", "account_name": "Beban Operasional Masjid", "account_type": "Expense", "is_active": True},
     {"account_code": "5140", "account_name": "Beban Kafalah (Honor/Gaji)", "account_type": "Expense", "is_active": True},
 ]
+
+def seed_default_accounts(organization_id: str):
+    """
+    Menyuntikkan default Chart of Accounts PSAK 109 untuk organisasi baru.
+    """
+    accounts_to_insert = []
+    
+    # Memetakan data dari array ke dalam format yang siap di-insert ke Supabase
+    for acc in DEFAULT_PSAK109_ACCOUNTS:
+        accounts_to_insert.append({
+            "organization_id": organization_id,
+            "account_code": acc["account_code"],
+            "account_name": acc["account_name"],
+            "account_type": acc["account_type"],
+            "is_active": acc["is_active"]
+        })
+    
+    try:
+        # Melakukan bulk insert ke tabel accounts
+        response = supabase.table("accounts").insert(accounts_to_insert).execute()
+        return response.data
+    except Exception as e:
+        print(f"Gagal melakukan seeding akun: {str(e)}")
+        return None
