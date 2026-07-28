@@ -1,5 +1,14 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import accounts, organizations, journals, ledgers, reports, exports
+from fastapi import APIRouter
+from app.api.v1.endpoints import (
+    accounts, 
+    journals, 
+    organizations, 
+    reports, 
+    exports, 
+    ledgers,
+    dashboard
+)
 
 api_router = APIRouter()
 
@@ -26,3 +35,5 @@ api_router.include_router(ledgers.router, prefix="/ledgers", tags=["Ledgers"])
 api_router.include_router(reports.router, prefix="/reports", tags=["Reports"])
 
 api_router.include_router(exports.router, prefix="/exports", tags=["Exports"])
+
+api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
