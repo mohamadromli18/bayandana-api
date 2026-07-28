@@ -1,15 +1,19 @@
 # app/api/v1/endpoints/journals.py
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from app.schemas.journal_schema import JournalCreate
 from app.core.database import supabase
+from app.core.security import get_current_org_id
 
 router = APIRouter()
 
 @router.post("/", response_model=dict, status_code=201)
-def create_journal(journal: JournalCreate):
-    # 1. Siapkan data untuk tabel induk (journals)
+def create_journal(
+    journal: JournalCreate, 
+    org_id: str = Depends(get_current_org_id) # Tambahkan argumen ini
+):
+    # 1. Siapkan data untuk tabel induk (journals) dengan org_id dari token JWT
     journal_data = {
-        "organization_id": str(journal.organization_id),
+        "organization_id": org_id, 
         "transaction_date": journal.transaction_date.isoformat(),
         "description": journal.description,
         "reference_number": journal.reference_number
@@ -44,6 +48,4 @@ def create_journal(journal: JournalCreate):
         }
         
     except Exception as e:
-        # Jika terjadi kegagalan, idealnya Anda menerapkan mekanisme rollback
-        # Namun Supabase Python client standar mengeksekusi ini secara terpisah
         raise HTTPException(status_code=500, detail=f"Terjadi kesalahan pada server: {str(e)}")
