@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import accounts, organizations, journals
+from app.api.v1.endpoints import accounts, organizations, journals, ledgers
 
 api_router = APIRouter()
 
@@ -18,3 +18,6 @@ api_router.include_router(
 
 # Daftarkan endpoint jurnal yang baru dibuat
 api_router.include_router(journals.router, prefix="/journals", tags=["Journals"])
+
+# Tambahkan rute untuk Buku Besar
+api_router.include_router(ledgers.router, prefix="/ledgers", tags=["Ledgers"])
