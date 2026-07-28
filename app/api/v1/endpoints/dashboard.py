@@ -1,136 +1,77 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, extract
+# app/api/v1/endpoints/dashboard.py
+from fastapi import APIRouter, HTTPException, Depends, status
 from datetime import date
-
-# Import Pydantic Schemas
 from app.schemas.dashboard_schema import DashboardSummary, RecentTransaction
-
-# Import Security & Database core
-from app.core.security import get_current_user
-from app.core.database import get_db
-
-# Import SQLAlchemy Models
-# Pastikan nama model dan file sesuai dengan struktur proyek Anda
-from app.models.account_model import Account
-from app.models.journal_model import Journal, JournalDetail 
+from app.core.security import get_current_org_id
+from app.core.database import supabase
 
 router = APIRouter()
 
 @router.get("/summary", response_model=DashboardSummary)
-async def get_dashboard_data(
-    db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
-):
-    # Ekstrak organization_id dari token JWT Supabase pengguna yang sedang login
-    organization_id = current_user.get("organization_id")
-    if not organization_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
-            detail="Organization ID tidak valid atau tidak ditemukan di token"
-        )
-
+def get_dashboard_data(org_id: str = Depends(get_current_org_id)):
     current_month = date.today().month
     current_year = date.today().year
 
     try:
-        # ---------------------------------------------------------
-        # 1. Total Saldo Kas & Bank (Akun Aset diawali '11')
-        # Saldo Normal Debit = (Total Debit - Total Kredit)
-        # ---------------------------------------------------------
-        stmt_kas = (
-            select(
-                func.coalesce(func.sum(JournalDetail.debit) - func.sum(JournalDetail.credit), 0)
-            )
-            .select_from(JournalDetail)
-            .join(Journal, Journal.id == JournalDetail.journal_id)
-            .join(Account, Account.id == JournalDetail.account_id)
-            .where(
-                Journal.organization_id == organization_id,
-                Account.code.like("11%"),
-                Journal.is_posted == True
-            )
-        )
-        result_kas = await db.execute(stmt_kas)
-        total_saldo_kas = float(result_kas.scalar() or 0.0)
+        # 1. Ambil semua akun untuk membedakan tipe akun
+        accounts_res = supabase.table("accounts").select("id, account_code, account_type").eq("organization_id", org_id).execute()
+        accounts = {acc["id"]: acc for acc in accounts_res.data}
 
-        # ---------------------------------------------------------
-        # 2. Total Penerimaan Bulan Ini (Akun Pendapatan Dana diawali '4')
-        # Saldo Normal Kredit = (Total Kredit - Total Debit)
-        # ---------------------------------------------------------
-        stmt_penerimaan = (
-            select(
-                func.coalesce(func.sum(JournalDetail.credit) - func.sum(JournalDetail.debit), 0)
-            )
-            .select_from(JournalDetail)
-            .join(Journal, Journal.id == JournalDetail.journal_id)
-            .join(Account, Account.id == JournalDetail.account_id)
-            .where(
-                Journal.organization_id == organization_id,
-                Account.code.like("4%"), 
-                extract('month', Journal.date) == current_month,
-                extract('year', Journal.date) == current_year,
-                Journal.is_posted == True
-            )
-        )
-        result_penerimaan = await db.execute(stmt_penerimaan)
-        total_penerimaan = float(result_penerimaan.scalar() or 0.0)
+        # 2. Ambil semua mutasi jurnal untuk organisasi ini
+        # Karena keterbatasan agregasi kompleks di REST API Supabase, kita hitung di sisi Python
+        mutations_res = supabase.table("journal_details").select(
+            "account_id, debit, credit, journals!inner(id, transaction_date, description)"
+        ).eq("journals.organization_id", org_id).execute()
 
-        # ---------------------------------------------------------
-        # 3. Total Penyaluran Bulan Ini (Akun Beban/Penyaluran diawali '5')
-        # Saldo Normal Debit = (Total Debit - Total Kredit)
-        # ---------------------------------------------------------
-        stmt_penyaluran = (
-            select(
-                func.coalesce(func.sum(JournalDetail.debit) - func.sum(JournalDetail.credit), 0)
-            )
-            .select_from(JournalDetail)
-            .join(Journal, Journal.id == JournalDetail.journal_id)
-            .join(Account, Account.id == JournalDetail.account_id)
-            .where(
-                Journal.organization_id == organization_id,
-                Account.code.like("5%"), 
-                extract('month', Journal.date) == current_month,
-                extract('year', Journal.date) == current_year,
-                Journal.is_posted == True
-            )
-        )
-        result_penyaluran = await db.execute(stmt_penyaluran)
-        total_penyaluran = float(result_penyaluran.scalar() or 0.0)
+        total_saldo_kas = 0.0
+        total_penerimaan = 0.0
+        total_penyaluran = 0.0
+        
+        # Dictionary untuk mengelompokkan total transaksi terbaru
+        recent_journals_map = {}
 
-        # ---------------------------------------------------------
-        # 4. Ambil 5 Transaksi Jurnal Terbaru
-        # ---------------------------------------------------------
-        stmt_recent = (
-            select(Journal)
-            .where(Journal.organization_id == organization_id)
-            .order_by(Journal.date.desc())
-            .limit(5)
-        )
-        result_recent = await db.execute(stmt_recent)
-        recent_journals = result_recent.scalars().all()
+        for mut in mutations_res.data:
+            acc_id = mut["account_id"]
+            debit = float(mut["debit"])
+            credit = float(mut["credit"])
+            journal_info = mut["journals"]
+            tgl_transaksi = date.fromisoformat(journal_info["transaction_date"])
 
-        transaksi_terbaru = []
-        for journal in recent_journals:
-            # Hitung total debit per jurnal untuk ditampilkan di dashboard
-            stmt_journal_total = (
-                select(func.coalesce(func.sum(JournalDetail.debit), 0))
-                .where(JournalDetail.journal_id == journal.id)
-            )
-            res_total = await db.execute(stmt_journal_total)
-            journal_total = float(res_total.scalar() or 0.0)
+            if acc_id not in accounts:
+                continue
 
-            transaksi_terbaru.append(
-                RecentTransaction(
-                    id=str(journal.id),
-                    tanggal=journal.date,
-                    deskripsi=journal.description, # Sesuaikan jika kolom Anda bernama 'memo' atau 'keterangan'
-                    total_debit=journal_total,
-                    total_kredit=journal_total # Karena balance, total kredit diasumsikan sama
-                )
-            )
+            acc_code = accounts[acc_id]["account_code"]
+            
+            # Hitung Saldo Kas (Kode diawali 11) -> Normal Debit
+            if acc_code.startswith("11"):
+                total_saldo_kas += (debit - credit)
+                
+            # Hitung Penerimaan & Penyaluran bulan ini
+            if tgl_transaksi.month == current_month and tgl_transaksi.year == current_year:
+                # Penerimaan (Kode diawali 4) -> Normal Kredit
+                if acc_code.startswith("4"):
+                    total_penerimaan += (credit - debit)
+                # Penyaluran (Kode diawali 5) -> Normal Debit
+                elif acc_code.startswith("5"):
+                    total_penyaluran += (debit - credit)
 
-        # Mengembalikan data sesuai Pydantic Schema
+            # Siapkan data untuk transaksi terbaru
+            j_id = journal_info["id"]
+            if j_id not in recent_journals_map:
+                recent_journals_map[j_id] = {
+                    "id": str(j_id),
+                    "tanggal": tgl_transaksi,
+                    "deskripsi": journal_info["description"],
+                    "total_debit": 0.0,
+                    "total_kredit": 0.0
+                }
+            recent_journals_map[j_id]["total_debit"] += debit
+            recent_journals_map[j_id]["total_kredit"] += credit
+
+        # Urutkan transaksi terbaru dan ambil 5 teratas
+        sorted_recent = sorted(recent_journals_map.values(), key=lambda x: x["tanggal"], reverse=True)[:5]
+        transaksi_terbaru = [RecentTransaction(**item) for item in sorted_recent]
+
         return DashboardSummary(
             total_saldo_kas=total_saldo_kas,
             penerimaan_bulan_ini=total_penerimaan,
@@ -139,7 +80,6 @@ async def get_dashboard_data(
         )
 
     except Exception as e:
-        # Menangkap error database dan menampilkannya sebagai internal server error
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
             detail=f"Terjadi kesalahan saat memproses data dashboard: {str(e)}"
