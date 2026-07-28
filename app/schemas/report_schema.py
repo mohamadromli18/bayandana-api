@@ -18,3 +18,18 @@ class FinancialPositionResponse(BaseModel):
     total_fund_balances: float
     total_liabilities_and_funds: float
     is_balanced: bool
+    
+class FundChangeItem(BaseModel):
+    account_code: str
+    account_name: str
+    amount: float
+
+class FundChangesResponse(BaseModel):
+    organization_id: str
+    start_date: str
+    end_date: str
+    revenues: List[FundChangeItem]
+    total_revenue: float
+    expenses: List[FundChangeItem]
+    total_expense: float
+    net_surplus_deficit: float

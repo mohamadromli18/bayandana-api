@@ -3,7 +3,12 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from datetime import date
 from app.core.database import supabase
 from app.core.security import get_current_org_id
-from app.schemas.report_schema import FinancialPositionResponse, AccountBalance
+from app.schemas.report_schema import (
+    FinancialPositionResponse, 
+    AccountBalance, 
+    FundChangesResponse, 
+    FundChangeItem
+)
 
 router = APIRouter()
 
@@ -84,6 +89,85 @@ def get_financial_position(
             total_fund_balances=total_equities,
             total_liabilities_and_funds=total_liabilities_and_funds,
             is_balanced=is_balanced
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.get("/fund-changes", response_model=FundChangesResponse)
+def get_fund_changes(
+    start_date: date = Query(..., description="Tanggal awal periode (YYYY-MM-DD)"),
+    end_date: date = Query(..., description="Tanggal akhir periode (YYYY-MM-DD)"),
+    org_id: str = Depends(get_current_org_id)
+):
+    try:
+        # 1. Ambil semua akun Pendapatan/Penerimaan (Revenue) dan Beban/Penyaluran (Expense)
+        accounts_res = supabase.table("accounts").select("id, account_code, account_name, account_type")\
+            .eq("organization_id", org_id)\
+            .in_("account_type", ["Revenue", "Expense"]).execute()
+            
+        accounts = accounts_res.data
+        if not accounts:
+            raise HTTPException(status_code=404, detail="Tidak ada data akun penerimaan atau penyaluran.")
+
+        # 2. Ambil seluruh mutasi jurnal dalam rentang tanggal
+        mutations_res = supabase.table("journal_details").select(
+            "account_id, debit, credit, journals!inner(transaction_date)"
+        ).eq("journals.organization_id", org_id)\
+         .gte("journals.transaction_date", start_date.isoformat())\
+         .lte("journals.transaction_date", end_date.isoformat()).execute()
+         
+        mutations = mutations_res.data
+
+        # 3. Kelompokkan mutasi berdasarkan ID Akun
+        account_balances = {acc["id"]: 0.0 for acc in accounts}
+        account_types = {acc["id"]: acc["account_type"] for acc in accounts}
+        
+        for mut in mutations:
+            acc_id = mut["account_id"]
+            if acc_id in account_balances:
+                debit = float(mut["debit"])
+                credit = float(mut["credit"])
+                
+                # Kalkulasi berdasarkan Saldo Normal
+                # Penerimaan (Revenue) bertambah di Kredit
+                if account_types[acc_id] == "Revenue":
+                    account_balances[acc_id] += (credit - debit)
+                # Penyaluran/Beban (Expense) bertambah di Debit
+                elif account_types[acc_id] == "Expense":
+                    account_balances[acc_id] += (debit - credit)
+
+        # 4. Susun respons ke dalam kategori
+        revenues, expenses = [], []
+        total_revenue = total_expense = 0.0
+
+        for acc in accounts:
+            balance = account_balances[acc["id"]]
+            item_data = FundChangeItem(
+                account_code=acc["account_code"],
+                account_name=acc["account_name"],
+                amount=balance
+            )
+            
+            if acc["account_type"] == "Revenue":
+                revenues.append(item_data)
+                total_revenue += balance
+            elif acc["account_type"] == "Expense":
+                expenses.append(item_data)
+                total_expense += balance
+
+        # Menghitung Surplus/Defisit (Positif = Surplus, Negatif = Defisit)
+        net_surplus_deficit = total_revenue - total_expense
+
+        return FundChangesResponse(
+            organization_id=org_id,
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
+            revenues=revenues,
+            total_revenue=total_revenue,
+            expenses=expenses,
+            total_expense=total_expense,
+            net_surplus_deficit=net_surplus_deficit
         )
 
     except Exception as e:
